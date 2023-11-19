@@ -53,12 +53,11 @@ class BoundaryWall(Drawable):
         )
 
     def draw(self):
-        _pg.draw.line(
+        _pg.draw.aaline(
             surface=SCREEN,
             color=COLOR_WHITE,
             start_pos=(self.start.x, self.start.y),
             end_pos=(self.end.x, self.end.y),
-            width=3,
         )
 
 
