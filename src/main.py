@@ -1,7 +1,6 @@
 import abc as _abc
 import math as _math
 import pygame as _pg
-import threading as _threading
 
 _pg.init()
 _pg.display.set_caption("Rays")
