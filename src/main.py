@@ -14,9 +14,17 @@ FPS_TARGET = 60
 SPEED_MOV = _SPEED
 SPEED_ROT = _SPEED
 DELTA_TIME = float()
+GRAVITY = float(9.81)
 COLOR_BLACK = (0, 0, 0)
 COLOR_WHITE = (255, 255, 255)
 TOTAL_PIXELS = CANVAS_WIDTH * CANVAS_HEIGHT
+
+
+class Directions:
+    UP = "UP"
+    DOWN = "DOWN"
+    LEFT = "LEFT"
+    RIGHT = "RIGHT"
 
 
 class Drawable(_abc.ABC):
@@ -31,12 +39,12 @@ class Point:
         self.x = x
         self.y = y
 
-    def intersects_line(self, line: "Wall"):
-        d1 = _math.hypot(self.x - line.end.x, self.y - line.end.y)
-        d2 = _math.hypot(self.x - line.start.x, self.y - line.start.y)
+    def intersects_line(self, line: "Wall") -> tuple[bool, float]:
+        dist_from_end = _math.hypot(self.x - line.end.x, self.y - line.end.y)
+        dist_from_start = _math.hypot(self.x - line.start.x, self.y - line.start.y)
         line_length = _math.hypot(line.start.x - line.end.x, line.start.y - line.end.y)
 
-        return abs(d1 + d2 - line_length) < 0.01
+        return abs(dist_from_end + dist_from_start - line_length) < 0.01
 
 
 # Define the BoundaryWall class
@@ -60,6 +68,17 @@ class BoundaryWall(Drawable):
             end_pos=(self.end.x, self.end.y),
         )
 
+    def intersects_line(self, line: "BoundaryWall"):
+        def ccw(A, B, C):
+            return (C.y - A.y) * (B.x - A.x) > (B.y - A.y) * (C.x - A.x)
+
+        A = self.start
+        B = self.end
+        C = line.start
+        D = line.end
+
+        return ccw(A, C, D) != ccw(B, C, D) and ccw(A, B, C) != ccw(A, B, D)
+
 
 # Define the Wall class
 class Wall(BoundaryWall):
@@ -73,17 +92,27 @@ class Wall(BoundaryWall):
 
         super().draw()
 
+    def get_angle(self, direction: Directions) -> float:
+        if direction == Directions.LEFT:
+            dx_line = self.start.x - self.end.x
+            dy_line = self.start.y - self.end.y
+        elif direction == Directions.RIGHT:
+            dx_line = self.end.x - self.start.x
+            dy_line = self.end.y - self.start.y
+
+        return _math.atan2(dy_line, dx_line)
+
     def rotate(self, angle_degrees):
         center = self.center
         angle_radians = _math.radians(angle_degrees)
 
-        # Translate points to origin
-        translated_start_x = self.start.x - center.x
-        translated_start_y = self.start.y - center.y
+        # Translate the line to origin
         translated_end_x = self.end.x - center.x
         translated_end_y = self.end.y - center.y
+        translated_start_x = self.start.x - center.x
+        translated_start_y = self.start.y - center.y
 
-        # Rotate points
+        # Rotate the line
         rotated_start_x = translated_start_x * _math.cos(
             angle_radians
         ) - translated_start_y * _math.sin(angle_radians)
@@ -97,11 +126,11 @@ class Wall(BoundaryWall):
             angle_radians
         ) + translated_end_y * _math.cos(angle_radians)
 
-        # Translate points back
-        self.start.x = rotated_start_x + center.x
-        self.start.y = rotated_start_y + center.y
+        # Translate line back or original coordinates
         self.end.x = rotated_end_x + center.x
         self.end.y = rotated_end_y + center.y
+        self.start.x = rotated_start_x + center.x
+        self.start.y = rotated_start_y + center.y
 
 
 # Define the Ray class
@@ -111,7 +140,9 @@ class Ray(Drawable):
         self.source = source
         self.length = length
         self.end_point: Point | None = None
-        self.direction = _pg.math.Vector2(_math.cos(angle), _math.sin(angle)) * length
+        self.direction: Point = (
+            _pg.math.Vector2(_math.cos(angle), _math.sin(angle)) * length
+        )
 
     def draw(self):
         self.calculate_end_point()
@@ -132,8 +163,7 @@ class Ray(Drawable):
         nearest_wall_intersection_point = None
 
         for wall in WALLS:
-            intersects_at = self.intersects_line(wall)
-            if intersects_at:
+            if intersects_at := self.intersects_line(wall):
                 distance_to_wall = _math.hypot(
                     self.source.x - intersects_at.x, self.source.y - intersects_at.y
                 )
@@ -207,11 +237,15 @@ class LightSource(Drawable):
                 y = self.pos.y + SPEED_MOV * DELTA_TIME
                 self.pos.y = min(CANVAS_HEIGHT, y)
             if keys[_pg.K_a]:
-                x = self.pos.x - SPEED_MOV * DELTA_TIME
-                self.pos.x = max(0, x)
+                new_x_lat = max(0, self.pos.x - SPEED_MOV * DELTA_TIME)
+                self.pos = self.intersects_any_line(
+                    Point(new_x_lat, self.pos.y), Directions.LEFT
+                )
             if keys[_pg.K_d]:
-                x = self.pos.x + SPEED_MOV * DELTA_TIME
-                self.pos.x = min(CANVAS_WIDTH, x)
+                new_x_lat = min(CANVAS_WIDTH, self.pos.x + SPEED_MOV * DELTA_TIME)
+                self.pos = self.intersects_any_line(
+                    Point(new_x_lat, self.pos.y), Directions.RIGHT
+                )
 
         _pg.draw.circle(SCREEN, self.color, (self.pos.x, self.pos.y), self.radius)
 
@@ -222,7 +256,29 @@ class LightSource(Drawable):
         for i in range(1, self.ray_density + 1):
             angle = i * 2 * _math.pi / self.ray_density
             Ray(self.pos, angle, TOTAL_PIXELS, self.color).draw()
-            # _threading.Thread(target=Ray(self.pos, angle, TOTAL_PIXELS).draw).start()
+
+    def intersects_any_line(self, new_pos: Point, direction: Directions) -> Point:
+        temp_line = Wall(self.pos, new_pos)
+        for wall in WALLS:
+            if temp_line.intersects_line(wall):
+                wall_angle = wall.get_angle(direction)
+
+                if wall_angle in [_math.pi, -_math.pi, _math.pi / 2, -_math.pi / 2]:
+                    # Block movement on vertical or horizontal lines
+                    return self.pos
+
+                move_length = _math.hypot(
+                    new_pos.x - self.pos.x, new_pos.y - self.pos.y
+                )
+                direction_vector: Point = (
+                    _pg.math.Vector2(_math.cos(wall_angle), _math.sin(wall_angle))
+                    * move_length
+                )
+                return Point(
+                    self.pos.x + direction_vector.x, self.pos.y + direction_vector.y
+                )
+
+        return new_pos
 
 
 def showStats():
