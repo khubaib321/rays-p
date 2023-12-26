@@ -1,11 +1,12 @@
 import abc as _abc
 import math as _math
 import pygame as _pg
+import enum as _enum
 
 _pg.init()
 _pg.display.set_caption("Rays")
 CLOCK = _pg.time.Clock()
-FONT = _pg.font.SysFont(None, 24)
+FONT = _pg.font.SysFont("Rays", 24)
 CANVAS_WIDTH, CANVAS_HEIGHT = 1600, 900
 SCREEN = _pg.display.set_mode(size=(CANVAS_WIDTH, CANVAS_HEIGHT), vsync=_pg.DOUBLEBUF)
 
@@ -20,7 +21,7 @@ COLOR_WHITE = (255, 255, 255)
 TOTAL_PIXELS = CANVAS_WIDTH * CANVAS_HEIGHT
 
 
-class Directions:
+class Directions(_enum.Enum):
     UP = "UP"
     DOWN = "DOWN"
     LEFT = "LEFT"
@@ -29,17 +30,17 @@ class Directions:
 
 class Drawable(_abc.ABC):
     @_abc.abstractmethod
-    def draw():
+    def draw() -> None:
         raise NotImplementedError()
 
 
 # Define the Point class
 class Point:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
+    def __init__(self, x: float, y: float) -> None:
+        self.x: float = x
+        self.y: float = y
 
-    def intersects_line(self, line: "Wall") -> tuple[bool, float]:
+    def intersects_line(self, line: "Wall") -> float:
         dist_from_end = _math.hypot(self.x - line.end.x, self.y - line.end.y)
         dist_from_start = _math.hypot(self.x - line.start.x, self.y - line.start.y)
         line_length = _math.hypot(line.start.x - line.end.x, line.start.y - line.end.y)
@@ -49,7 +50,7 @@ class Point:
 
 # Define the BoundaryWall class
 class BoundaryWall(Drawable):
-    def __init__(self, start_point: Point, end_point: Point):
+    def __init__(self, start_point: Point, end_point: Point) -> None:
         self.start = start_point
         self.end = end_point
 
@@ -60,7 +61,7 @@ class BoundaryWall(Drawable):
             (self.start.y + self.end.y) / 2,
         )
 
-    def draw(self):
+    def draw(self) -> None:
         _pg.draw.aaline(
             surface=SCREEN,
             color=COLOR_WHITE,
@@ -68,7 +69,19 @@ class BoundaryWall(Drawable):
             end_pos=(self.end.x, self.end.y),
         )
 
-    def intersects_line(self, line: "BoundaryWall"):
+    def get_angle(self, direction: Directions) -> float:
+        if direction == Directions.LEFT:
+            dx_line = self.start.x - self.end.x
+            dy_line = self.start.y - self.end.y
+        elif direction == Directions.RIGHT:
+            dx_line = self.end.x - self.start.x
+            dy_line = self.end.y - self.start.y
+        else:
+            raise NotImplementedError(f"Direction {direction} not implemented")
+
+        return _math.atan2(dy_line, dx_line)
+
+    def intersects_line(self, line: "BoundaryWall") -> bool:
         def ccw(A, B, C):
             return (C.y - A.y) * (B.x - A.x) > (B.y - A.y) * (C.x - A.x)
 
@@ -82,7 +95,7 @@ class BoundaryWall(Drawable):
 
 # Define the Wall class
 class Wall(BoundaryWall):
-    def draw(self):
+    def draw(self) -> None:
         # Only rorate one-way at a time
         keys = _pg.key.get_pressed()
         if keys[_pg.K_RSHIFT]:
@@ -92,17 +105,7 @@ class Wall(BoundaryWall):
 
         super().draw()
 
-    def get_angle(self, direction: Directions) -> float:
-        if direction == Directions.LEFT:
-            dx_line = self.start.x - self.end.x
-            dy_line = self.start.y - self.end.y
-        elif direction == Directions.RIGHT:
-            dx_line = self.end.x - self.start.x
-            dy_line = self.end.y - self.start.y
-
-        return _math.atan2(dy_line, dx_line)
-
-    def rotate(self, angle_degrees):
+    def rotate(self, angle_degrees) -> None:
         center = self.center
         angle_radians = _math.radians(angle_degrees)
 
@@ -135,30 +138,16 @@ class Wall(BoundaryWall):
 
 # Define the Ray class
 class Ray(Drawable):
-    def __init__(self, source: Point, angle: float, length: int, color: tuple):
+    def __init__(self, source: Point, angle: float, length: int, color: tuple) -> None:
         self.color = color
         self.source = source
         self.length = length
         self.end_point: Point | None = None
-        self.direction: Point = (
+        self.direction: _pg.Vector2 = (
             _pg.math.Vector2(_math.cos(angle), _math.sin(angle)) * length
         )
 
-    def draw(self):
-        self.calculate_end_point()
-
-        assert (
-            self.end_point is not None
-        ), "No end_point set for this Ray. Either set an end_point or call calculate_end_point() before the draw occurs."
-
-        _pg.draw.aaline(
-            SCREEN,
-            self.color,
-            (self.source.x, self.source.y),
-            (self.end_point.x, self.end_point.y),
-        )
-
-    def calculate_end_point(self):
+    def _set_end_point(self) -> None:
         nearest_wall_distance = self.length
         nearest_wall_intersection_point = None
 
@@ -180,7 +169,21 @@ class Ray(Drawable):
 
         self.end_point = end_point
 
-    def intersects_line(self, line: Wall):
+    def draw(self) -> None:
+        self._set_end_point()
+
+        assert (
+            self.end_point is not None
+        ), "No end_point set for this Ray. Either set an end_point or call _set_end_point() before the draw occurs."
+
+        _pg.draw.aaline(
+            SCREEN,
+            self.color,
+            (self.source.x, self.source.y),
+            (self.end_point.x, self.end_point.y),
+        )
+
+    def intersects_line(self, line: BoundaryWall) -> Point | None:
         x1, y1 = self.source.x, self.source.y
         x2, y2 = self.source.x + self.direction.x, self.source.y + self.direction.y
 
@@ -212,7 +215,7 @@ class Ray(Drawable):
 
 # Define the LightSource class
 class LightSource(Drawable):
-    def __init__(self, color: tuple, ray_density: int = 1):
+    def __init__(self, color: tuple, ray_density: int = 1) -> None:
         self.radius = 5
         self.color = color
         self.ray_density = ray_density
@@ -220,7 +223,7 @@ class LightSource(Drawable):
         self._mouse_x_old = 0
         self._mouse_y_old = 0
 
-    def draw(self):
+    def draw(self) -> None:
         keys = _pg.key.get_pressed()
         mouse_x, mouse_y = _pg.mouse.get_pos()
 
@@ -232,7 +235,7 @@ class LightSource(Drawable):
             # Follow WASD keys.
             if keys[_pg.K_w]:
                 y = self.pos.y - SPEED_MOV * DELTA_TIME
-                self.pos.y = max(0, y)
+                self.pos.y = max(float(0), y)
             if keys[_pg.K_s]:
                 y = self.pos.y + SPEED_MOV * DELTA_TIME
                 self.pos.y = min(CANVAS_HEIGHT, y)
@@ -252,7 +255,7 @@ class LightSource(Drawable):
         if _pg.mouse.get_pressed()[0] or keys[_pg.K_SPACE]:
             self.draw_rays()
 
-    def draw_rays(self):
+    def draw_rays(self) -> None:
         for i in range(1, self.ray_density + 1):
             angle = i * 2 * _math.pi / self.ray_density
             Ray(self.pos, angle, TOTAL_PIXELS, self.color).draw()
@@ -270,7 +273,7 @@ class LightSource(Drawable):
                 move_length = _math.hypot(
                     new_pos.x - self.pos.x, new_pos.y - self.pos.y
                 )
-                direction_vector: Point = (
+                direction_vector: _pg.Vector2 = (
                     _pg.math.Vector2(_math.cos(wall_angle), _math.sin(wall_angle))
                     * move_length
                 )
@@ -281,7 +284,7 @@ class LightSource(Drawable):
         return new_pos
 
 
-def showStats():
+def show_stats() -> None:
     fps = CLOCK.get_fps()
     stats = f"FPS: {int(fps)}, SPEED_MOV: {SPEED_MOV}, SPEED_ROT: {SPEED_ROT}"
 
@@ -291,7 +294,7 @@ def showStats():
 
 
 # Walls setup
-WALLS: list[Wall] = [
+WALLS: list[BoundaryWall] = [
     # Obstacles
     Wall(Point(300, 100), Point(500, 300)),
     Wall(Point(200, 600), Point(500, 800)),
@@ -308,7 +311,7 @@ WALLS: list[Wall] = [
 # Initialize scene objects
 DRAWABLES: list[Drawable] = [
     *WALLS,
-    LightSource((253, 184, 19), 1440),
+    LightSource(color=(253, 184, 19), ray_density=1440),
 ]
 
 # Main loop
@@ -343,8 +346,8 @@ while running:
     # Draw all objects
     [obj.draw() for obj in DRAWABLES]
 
-    # Update the display
-    showStats()
+    # Update the stats & display
+    show_stats()
     _pg.display.flip()
 
     # Time elapsed since previous render
